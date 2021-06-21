@@ -8,6 +8,12 @@ use App\Http\Resources\Product\ProductCollection;
 use Illuminate\Http\Request;
 use App\Http\Requests\ProductRequest;
 use Symfony\Component\HttpFoundation\Response;
+use App\Exceptions\ProductModelNotFoundException;
+use App\Exceptions\ProductNotBelongsToUser;
+use App\Exceptions\RouteNotFoundException;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
+use Auth;
 
 class ProductController extends Controller
 {
@@ -22,7 +28,12 @@ class ProductController extends Controller
      */
     public function index()
     {
-        return ProductCollection::collection(Product::paginate(20));
+        try{
+            return ProductCollection::collection(Product::paginate(20));
+        }
+        catch(\Exception $exception) {
+            throw new ProductModelNotFoundException();
+        }
     }
 
     /**
@@ -44,6 +55,7 @@ class ProductController extends Controller
     public function store(ProductRequest $request)
     {
         $product = new Product;
+        $product->user_id = Auth::id();
         $product->name = $request->name;
         $product->detail = $request->description;
         $product->price = $request->price;
@@ -62,9 +74,23 @@ class ProductController extends Controller
      * @param  \App\Models\Product  $product
      * @return \Illuminate\Http\Response
      */
-    public function show(Product $product)
+    public function show($id)
     {
-        return new ProductResource($product);
+        // $product = Product::findOrFail($id);
+        // return new ProductResource($product);
+        try
+        {
+            $product = Product::findOrFail($id);
+            return new ProductResource($product);
+        }
+        catch(NotFoundHttpException $exception)
+        {
+            throw new RouteNotFoundException();
+        }
+        catch(ModelNotFoundException $exception)
+        {
+            throw new ProductModelNotFoundException();
+        }
     }
 
     /**
@@ -85,25 +111,41 @@ class ProductController extends Controller
      * @param  \App\Models\Product  $product
      * @return \Illuminate\Http\Response
      */
-    public function update(Request $request, Product $product)
+    public function update(Request $request, $id)
     {
-        $request['detail'] = $request['description'];
-        unset($request['description']);
-        $product->update($request->all());
-
-        return response([
-            'data' => new ProductResource($product)
-        ], Response::HTTP_CREATED);
+        try{
+            $product = Product::findOrFail($id);
+            $this->ProductUserCheck($product);
+            $request['detail'] = $request['description'];
+            unset($request['description']);
+            $product->update($request->all());
+    
+            return response([
+                'data' => new ProductResource($product)
+            ], Response::HTTP_CREATED);
+        }
+        catch(NotFoundHttpException $exception)
+        {
+            throw new RouteNotFoundException();
+        }
+        catch(ModelNotFoundException $exception)
+        {
+            throw new ProductModelNotFoundException();
+        }
     }
 
-    /**
-     * Remove the specified resource from storage.
-     *
-     * @param  \App\Models\Product  $product
-     * @return \Illuminate\Http\Response
-     */
     public function destroy(Product $product)
     {
-        //
+        $this->ProductUserCheck($product);
+        $product->delete();
+        return response(null, Response::HTTP_NO_CONTENT);
+    }
+
+    public function ProductUserCheck($product)
+    {
+        if(Auth::id() !== $product->user_id)
+        {
+            throw new ProductNotBelongsToUser;
+        }
     }
 }
